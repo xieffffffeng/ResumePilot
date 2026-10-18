@@ -17,8 +17,6 @@
 
 ResumePilot 是一个面向求职场景的桌面助手：维护个人经历资料，粘贴目标岗位 JD，调用大模型生成定制简历、匹配反馈和面试问题，并导出 Markdown 或 PDF。
 
-项目由 [xieffffffeng](https://github.com/xieffffffeng) 维护，围绕“整理经历 → 匹配岗位 → 准备面试”组织完整的桌面使用流程。
-
 ## 界面预览
 
 ![ResumePilot 桌面工作台](docs/assets/workspace.png)
