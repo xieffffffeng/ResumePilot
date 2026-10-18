@@ -1,0 +1,59 @@
+{
+  "name": "resumepilot-agent",
+  "version": "0.1.0",
+  "description": "ResumePilot: a desktop workspace for tailored resumes, job-fit feedback, and interview preparation.",
+  "author": {
+    "name": "xieffffffeng",
+    "url": "https://github.com/xieffffffeng"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xieffffffeng/ResumePilot.git"
+  },
+  "homepage": "https://github.com/xieffffffeng/ResumePilot#readme",
+  "bugs": {
+    "url": "https://github.com/xieffffffeng/ResumePilot/issues"
+  },
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win portable",
+    "dist:cn": "set ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/&& electron-builder --win portable",
+    "dist:standalone": "npm run dist",
+    "dist:standalone:cn": "npm run dist:cn"
+  },
+  "build": {
+    "appId": "io.github.xieffffffeng.resumepilot",
+    "productName": "ResumePilot",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [],
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "electronVersion": "42.4.1",
+    "win": {
+      "signAndEditExecutable": false,
+      "signExecutable": false,
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "ResumePilot-${version}-portable.exe"
+    }
+  },
+  "devDependencies": {
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3"
+  }
+}

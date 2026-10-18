@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResumePilot · 简历与面试工作台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">CV</div>
+          <div>
+            <h1>ResumePilot</h1>
+            <p id="dataRoot">Local workspace</p>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>用户名</span>
+          <div class="inline-control">
+            <input id="username" placeholder="username" />
+            <button id="loadUserBtn" class="icon-btn" title="加载用户" aria-label="加载用户">↗</button>
+          </div>
+        </label>
+
+        <label class="field">
+          <span>已有用户</span>
+          <select id="userSelect"></select>
+        </label>
+
+        <nav class="steps">
+          <button class="step-btn active" data-step="profile">基本信息</button>
+          <button class="step-btn" data-step="jd">岗位 JD</button>
+          <button class="step-btn" data-step="resume">简历整理</button>
+          <button class="step-btn" data-step="evaluation">简历评估</button>
+          <button class="step-btn" data-step="interview">模拟面试</button>
+        </nav>
+
+        <section class="agent-panel">
+          <div class="settings-heading">
+            <span>Agent 后端</span>
+            <strong id="backendBadge">LLM</strong>
+          </div>
+          <p id="agentSummary" class="agent-summary">LLM 工作流已就绪</p>
+          <button id="openSettingsBtn" class="settings-open">设置</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">本地资料库 / JD 匹配 / 面试演练</p>
+            <h2 id="screenTitle">基本信息</h2>
+            <p id="backendStatus" class="backend-status">LLM 工作流已就绪</p>
+          </div>
+          <div class="actions">
+            <button id="newProfileBtn">新建</button>
+            <button id="openSettingsTopBtn">设置</button>
+            <button id="saveProfileBtn" class="primary">保存资料</button>
+            <button id="runWorkflowBtn" class="accent">运行流程</button>
+          </div>
+        </header>
+
+        <section id="profile" class="view active">
+          <div class="identity-strip">
+            <div>
+              <span>资料源</span>
+              <strong>长期候选人数据库</strong>
+            </div>
+            <div>
+              <span>匹配方式</span>
+              <strong>按 JD 抽取相关经历</strong>
+            </div>
+            <div>
+              <span>输出</span>
+              <strong>简历 / 评分 / 面试问题</strong>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label class="field"><span>姓名</span><input id="name" /></label>
+            <label class="field"><span>生日</span><input id="birthday" type="date" /></label>
+            <label class="field"><span>年龄</span><input id="age" readonly placeholder="选择生日后显示" /></label>
+            <label class="field"><span>学校</span><input id="school" /></label>
+            <label class="field"><span>邮箱</span><input id="email" /></label>
+            <label class="field"><span>身份证号</span><input id="idNumber" /></label>
+            <label class="field"><span>电话</span><input id="phone" /></label>
+            <label class="field"><span>城市</span><input id="location" /></label>
+          </div>
+
+          <div class="photo-upload-panel">
+            <div class="photo-preview" id="photoPreview">证件照</div>
+            <div class="photo-controls">
+              <label class="field">
+                <span>个人证件照</span>
+                <input id="photoInput" type="file" accept="image/png,image/jpeg,image/webp" />
+              </label>
+              <button id="removePhotoBtn" type="button">移除照片</button>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>技能关键词</span>
+            <textarea id="skills" rows="3" placeholder="React, TypeScript, Electron, Python"></textarea>
+          </label>
+
+          <label class="field">
+            <span>个人摘要</span>
+            <textarea id="selfSummary" rows="3"></textarea>
+          </label>
+
+          <div class="section-title">
+            <h3>教育背景</h3>
+            <button id="addEducationBtn">添加教育背景</button>
+          </div>
+          <div id="educationList" class="education-list"></div>
+
+          <div class="section-title">
+            <h3>实习/工作经历</h3>
+            <button id="addExperienceBtn">添加经历</button>
+          </div>
+          <div id="experienceList" class="experience-list"></div>
+
+          <div class="section-title">
+            <h3>项目经历</h3>
+            <button id="addProjectBtn">添加项目</button>
+          </div>
+          <div id="projectList" class="experience-list"></div>
+
+          <div class="section-title">
+            <h3>论文</h3>
+            <button id="addPaperBtn">添加论文</button>
+          </div>
+          <div id="paperList" class="experience-list"></div>
+        </section>
+
+        <section id="jd" class="view">
+          <div class="url-extractor">
+            <div class="jd-mode-note">
+              <strong>填写目标岗位</strong>
+              <span>将岗位名称、来源和 JD 原文填入下方，Agent 会据此筛选经历、整理简历并生成面试问题。</span>
+            </div>
+            <p class="extract-status">建议保留岗位职责、任职要求、技能关键词、地点、经验和学历要求等信息。</p>
+          </div>
+          <div class="split jd-result-grid">
+            <label class="field">
+              <span>岗位名称</span>
+              <input id="jobTitle" placeholder="例如：前端开发工程师" />
+            </label>
+            <label class="field">
+              <span>JD 来源</span>
+              <input id="jobSource" placeholder="公司 / 平台 / 链接，可选" />
+            </label>
+          </div>
+          <label class="field">
+            <span>岗位描述</span>
+            <textarea id="jdText" class="jd-box" placeholder="粘贴 JD 原文，包括岗位职责、任职要求、技能关键词、地点/薪资等信息。"></textarea>
+          </label>
+        </section>
+
+        <section id="resume" class="view">
+          <div class="output-toolbar">
+            <h3>简历整理 Agent</h3>
+            <div class="toolbar-actions">
+              <button id="exportResumeBtn">导出 Markdown</button>
+              <button id="exportResumePdfBtn" class="primary">导出 PDF</button>
+            </div>
+          </div>
+          <pre id="resumeOutput" class="markdown-output"></pre>
+        </section>
+
+        <section id="evaluation" class="view">
+          <div class="score-band">
+            <div class="score-number" id="scoreNumber">--</div>
+            <div>
+              <h3>评估 Agent</h3>
+              <p id="keywordCoverage">等待运行</p>
+            </div>
+          </div>
+          <div class="columns">
+            <div>
+              <h4>改进建议</h4>
+              <ul id="suggestions"></ul>
+            </div>
+            <div>
+              <h4>缺失关键词</h4>
+              <div id="missingKeywords" class="chips"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="interview" class="view">
+          <div class="output-toolbar">
+            <h3>面试官 Agent</h3>
+            <button id="exportInterviewBtn">导出问题</button>
+          </div>
+          <ol id="questionList" class="question-list"></ol>
+          <div id="interviewTips" class="tips"></div>
+        </section>
+
+        <footer id="statusBar" class="status-bar">Ready</footer>
+      </main>
+    </div>
+
+    <div id="settingsModal" class="modal-backdrop" aria-hidden="true">
+      <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="modal-header">
+          <div>
+            <p class="eyebrow">Model runtime</p>
+            <h2 id="settingsTitle">设置</h2>
+          </div>
+          <button id="closeSettingsBtn" class="icon-btn" title="关闭" aria-label="关闭">×</button>
+        </header>
+
+        <div class="settings-layout">
+          <div class="settings-form">
+            <div class="settings-section-title">
+              <h3>模型设置</h3>
+              <p>配置 Agent 调用的模型来源。</p>
+            </div>
+            <label class="field">
+              <span>运行方式</span>
+              <select id="backendMode">
+                <option value="llm">LLM API / Ollama / 本地模型</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Provider</span>
+              <select id="provider">
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="ollama">Ollama 本地</option>
+                <option value="lmstudio">本地 OpenAI-compatible</option>
+              </select>
+            </label>
+            <label class="field"><span>模型名</span><input id="modelName" placeholder="例如 deepseek-chat / gpt-4o-mini / llama3.1" /></label>
+            <label class="field"><span>Base URL</span><input id="baseUrl" placeholder="例如 https://api.deepseek.com/v1 或 http://localhost:1234/v1" /></label>
+            <label class="field"><span>API Key</span><input id="apiKey" type="password" placeholder="DeepSeek / OpenAI / OpenRouter 必填，本地模型可留空" /></label>
+            <label class="field"><span>超时时间（秒）</span><input id="timeoutSeconds" type="number" min="30" step="10" /></label>
+            <label class="toggle-field modal-toggle">
+              <input id="skillInjection" type="checkbox" />
+              <span>注入 Agent skills</span>
+            </label>
+            <div class="settings-section-title">
+              <h3>应用偏好</h3>
+              <p>调整启动、提示和界面密度。</p>
+            </div>
+            <label class="field">
+              <span>启动默认页面</span>
+              <select id="defaultStartView">
+                <option value="profile">基本信息</option>
+                <option value="jd">岗位 JD</option>
+                <option value="resume">简历整理</option>
+                <option value="evaluation">简历评估</option>
+                <option value="interview">模拟面试</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>保存提示停留时间（秒）</span>
+              <input id="toastSeconds" type="number" min="1" max="8" step="1" />
+            </label>
+            <label class="toggle-field modal-toggle">
+              <input id="autoOpenResumeAfterRun" type="checkbox" />
+              <span>流程完成后自动打开简历</span>
+            </label>
+            <label class="toggle-field modal-toggle">
+              <input id="compactUi" type="checkbox" />
+              <span>使用紧凑界面</span>
+            </label>
+            <div class="settings-actions">
+              <button id="saveSettingsBtn" class="settings-save">保存设置</button>
+              <button id="testModelBtn" class="settings-test">测试连接</button>
+            </div>
+          </div>
+
+          <div class="skill-panel">
+            <div class="skill-panel-heading">
+              <h3>Agent skill 列表</h3>
+              <button id="refreshSkillsBtn">刷新</button>
+            </div>
+            <div id="skillList" class="skill-list"></div>
+          </div>
+
+          <div class="user-manage-panel">
+            <div class="skill-panel-heading">
+              <h3>用户管理</h3>
+              <button id="refreshManagedUsersBtn">刷新</button>
+            </div>
+            <div id="managedUserList" class="managed-user-list"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div id="workflowOverlay" class="workflow-overlay" aria-hidden="true">
+      <div class="workflow-loader" role="status" aria-live="polite">
+        <div class="loader-ring" aria-hidden="true"></div>
+        <div>
+          <strong id="workflowOverlayTitle">Agent 正在整理材料</strong>
+          <p id="workflowOverlayDetail">正在生成简历、评分和模拟面试问题</p>
+        </div>
+      </div>
+    </div>
+    <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

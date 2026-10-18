@@ -1,0 +1,36 @@
+node_modules/
+npm-debug.log*
+
+# Build output
+dist/
+build/
+backend-dist/
+*.asar
+*.exe
+*.msi
+*.zip
+
+# Local runtime and generated files
+outputs/
+.vibeskills/
+.agents/
+vendor/
+backend/
+.venv-backend/
+docs/requirements/
+
+# User data and secrets
+.env
+.env.*
+*.local
+ResumeAgentData/
+ResumePilotData/
+settings.json
+profile.json
+artifacts/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
