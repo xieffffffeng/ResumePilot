@@ -6,8 +6,6 @@
 
 ResumePilot is a Windows desktop workspace for maintaining candidate profiles, tailoring resumes to job descriptions, receiving model-generated feedback, and preparing for interviews. It supports Markdown and PDF export.
 
-Maintained by [xieffffffeng](https://github.com/xieffffffeng), ResumePilot brings profile organization, job matching, and interview preparation into one desktop workflow.
-
 ## Preview
 
 ![ResumePilot workspace](docs/assets/workspace.png)
