@@ -7,9 +7,14 @@ const { buildResumePdfHtml } = require("./src/services/resume-pdf");
 const {
   buildJsonRepairPrompt,
   buildWorkflowPrompt,
+  getDifficultySkillName,
   normalizeWorkflowResult,
   parseJsonObject,
 } = require("./src/services/llm-workflow");
+const {
+  buildReviewPrompt,
+  normalizeReviewResult,
+} = require("./src/services/reviewer");
 
 let mainWindow;
 let storage;
@@ -22,6 +27,7 @@ const DEFAULT_SETTINGS = {
   apiKey: "",
   skillInjection: true,
   timeoutSeconds: 120,
+  contextLimit: 0,
   preferences: {
     defaultStartView: "profile",
     toastSeconds: 3,
@@ -31,16 +37,32 @@ const DEFAULT_SETTINGS = {
 };
 
 const LLM_PROVIDER_DEFAULTS = {
-  openai: { model: "gpt-4o-mini", baseUrl: "https://api.openai.com/v1", apiStyle: "openai" },
-  deepseek: { model: "deepseek-chat", baseUrl: "https://api.deepseek.com/v1", apiStyle: "openai" },
-  openrouter: { model: "deepseek/deepseek-chat", baseUrl: "https://openrouter.ai/api/v1", apiStyle: "openai" },
-  lmstudio: { model: "local-model", baseUrl: "http://localhost:1234/v1", apiStyle: "openai" },
-  ollama: { model: "llama3.1", baseUrl: "http://localhost:11434", apiStyle: "ollama" },
+  openai: { model: "gpt-4o-mini", baseUrl: "https://api.openai.com/v1", apiStyle: "openai", contextTokens: 128000 },
+  deepseek: { model: "deepseek-chat", baseUrl: "https://api.deepseek.com/v1", apiStyle: "openai", contextTokens: 65536 },
+  openrouter: { model: "deepseek/deepseek-chat", baseUrl: "https://openrouter.ai/api/v1", apiStyle: "openai", contextTokens: 65536 },
+  lmstudio: { model: "local-model", baseUrl: "http://localhost:1234/v1", apiStyle: "openai", contextTokens: 8192 },
+  ollama: { model: "llama3.1", baseUrl: "http://localhost:11434", apiStyle: "ollama", contextTokens: 8192 },
+  kimi: { model: "kimi-k2.0905-preview", baseUrl: "https://api.kimi.com/coding", apiStyle: "anthropic", contextTokens: 1048576 },
 };
 
 function getDataRoot() {
   const baseDir = app && app.getPath ? app.getPath("userData") : __dirname;
   return path.join(baseDir, "ResumePilotData");
+}
+
+function getUserSkillPath(name) {
+  const home = app && app.getPath ? app.getPath("home") : process.env.USERPROFILE || "";
+  return path.join(home, ".codex", "skills", name, "SKILL.md");
+}
+
+function getBundledSkillPath(name) {
+  return path.join(__dirname, "skills", name, "SKILL.md");
+}
+
+function resolveSkillPath(name) {
+  const userPath = getUserSkillPath(name);
+  if (fs.existsSync(userPath)) return userPath;
+  return getBundledSkillPath(name);
 }
 
 function createWindow() {
@@ -62,14 +84,16 @@ function createWindow() {
 }
 
 function getInstalledSkillPaths() {
-  const home = app && app.getPath ? app.getPath("home") : process.env.USERPROFILE || "";
-  const skillRoot = path.join(home, ".codex", "skills");
   return [
-    path.join(skillRoot, "getting-started", "SKILL.md"),
-    path.join(skillRoot, "design-agent", "SKILL.md"),
-    path.join(skillRoot, "design-task", "SKILL.md"),
-    path.join(skillRoot, "frontend-design", "SKILL.md"),
+    resolveSkillPath("getting-started"),
+    resolveSkillPath("design-agent"),
+    resolveSkillPath("design-task"),
+    resolveSkillPath("frontend-design"),
   ];
+}
+
+function getDifficultySkillPath(difficulty) {
+  return resolveSkillPath(getDifficultySkillName(difficulty));
 }
 
 function getAgentSkillList() {
@@ -106,6 +130,21 @@ function getAgentSkillList() {
   }));
 }
 
+function getDifficultySkillList() {
+  const profiles = [
+    { key: "easy", name: "interview-easy", purpose: "简单模式：基础题为主（6:3:1），热身建立信心" },
+    { key: "normal", name: "interview-normal", purpose: "普通模式：标准混合（3:5:2），默认档位" },
+    { key: "hard", name: "interview-hard", purpose: "困难模式：压力面试（1.5:3.5:5），陷阱题与追问链" },
+  ];
+  return profiles.map((profile) => ({
+    name: profile.name,
+    path: resolveSkillPath(profile.name),
+    agents: ["面试官 Agent"],
+    purpose: profile.purpose,
+    available: fs.existsSync(resolveSkillPath(profile.name)),
+  }));
+}
+
 function normalizeSettings(settings = {}) {
   const merged = { ...DEFAULT_SETTINGS, ...settings };
   merged.preferences = { ...DEFAULT_SETTINGS.preferences, ...(settings.preferences || {}) };
@@ -120,6 +159,13 @@ function normalizeSettings(settings = {}) {
     if (!String(merged.model || "").trim()) merged.model = providerDefault.model;
     if (!String(merged.baseUrl || "").trim()) merged.baseUrl = providerDefault.baseUrl;
   }
+  const explicitLimit = Number(merged.contextLimit);
+  merged.contextLimit = Math.max(
+    1000,
+    (Number.isFinite(explicitLimit) && explicitLimit > 0 ? explicitLimit : 0) ||
+      (providerDefault && providerDefault.contextTokens) ||
+      8000
+  );
   return merged;
 }
 
@@ -150,15 +196,77 @@ function formatLlmConnectionError(error, config) {
     if (config.provider === "lmstudio") {
       return `无法连接本地 OpenAI-compatible 服务：请确认 LM Studio/本地模型服务已启动，Base URL 为 ${config.baseUrl}。原始错误：${detail}`;
     }
+    if (config.apiStyle === "anthropic") {
+      return `无法连接 Anthropic 兼容服务（${config.provider}）：请确认 API Key 类型与该服务匹配，Base URL 为 ${config.baseUrl}。原始错误：${detail}`;
+    }
     return `无法连接 ${config.provider} API：请检查网络、代理、防火墙和 Base URL（${config.baseUrl}）。原始错误：${detail}`;
   }
   return message || "LLM API 调用失败";
 }
 
-async function runLlmPrompt({ prompt, settings, responseFormat = "json_object" }) {
+const DEFAULT_CHAT_SYSTEM_PROMPT = "你是一个中文求职助手。";
+const WORKFLOW_SYSTEM_PROMPT = "你是一个严格遵守 JSON 输出格式的中文求职助手。只输出最终结果，不解释过程。";
+
+function normalizeMessages(messages) {
+  const list = (Array.isArray(messages) ? messages : [])
+    .filter(
+      (message) =>
+        message &&
+        typeof message.content === "string" &&
+        ["system", "user", "assistant"].includes(message.role)
+    )
+    .map((message) => ({ role: message.role, content: message.content }));
+  if (!list.some((message) => message.role === "system")) {
+    list.unshift({ role: "system", content: DEFAULT_CHAT_SYSTEM_PROMPT });
+  }
+  return list;
+}
+
+function buildAnthropicRequestBody({ messages, model, maxTokens = 8192 }) {
+  const system = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  // Anthropic 要求 user/assistant 严格交替且以 user 开头：
+  // 合并连续同角色消息，丢弃开头悬空的 assistant 消息
+  const dialog = [];
+  for (const message of messages.filter((item) => item.role !== "system")) {
+    const last = dialog[dialog.length - 1];
+    if (last && last.role === message.role) {
+      last.content = `${last.content}\n\n${message.content}`;
+    } else {
+      dialog.push({ role: message.role, content: message.content });
+    }
+  }
+  while (dialog.length && dialog[0].role === "assistant") {
+    dialog.shift();
+  }
+  return {
+    model,
+    max_tokens: maxTokens,
+    ...(system ? { system } : {}),
+    messages: dialog,
+  };
+}
+
+function extractAnthropicText(body) {
+  return (Array.isArray(body && body.content) ? body.content : [])
+    .filter((block) => block && block.type === "text")
+    .map((block) => block.text || "")
+    .join("")
+    .trim();
+}
+
+async function runLlmPrompt({ prompt, messages, settings, responseFormat = "json_object" }) {
   const config = getLlmProviderConfig(settings);
   if (requiresApiKey(config.provider) && !config.apiKey) {
     throw new Error(`请先在设置中填写 ${config.provider} 的 API Key，或切换到 Ollama / LM Studio 本地模型。`);
+  }
+  const apiMessages = normalizeMessages(
+    messages || (prompt != null ? [{ role: "user", content: prompt }] : [])
+  );
+  if (!apiMessages.length) {
+    throw new Error("没有可发送给模型的消息。");
   }
   const controller = new AbortController();
   const timeoutMs = Math.max(30, settings.timeoutSeconds) * 1000;
@@ -172,10 +280,7 @@ async function runLlmPrompt({ prompt, settings, responseFormat = "json_object" }
         body: JSON.stringify({
           model: config.model,
           stream: false,
-          messages: [
-            { role: "system", content: "你是一个严格遵守输出格式的中文求职助手。" },
-            { role: "user", content: prompt },
-          ],
+          messages: apiMessages,
         }),
       });
       if (!response.ok) throw new Error(`Ollama 返回 HTTP ${response.status}`);
@@ -183,15 +288,36 @@ async function runLlmPrompt({ prompt, settings, responseFormat = "json_object" }
       return String((body.message && body.message.content) || body.response || "").trim();
     }
 
+    if (config.apiStyle === "anthropic") {
+      const response = await fetch(`${config.baseUrl}/v1/messages`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": config.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(buildAnthropicRequestBody({ messages: apiMessages, model: config.model })),
+      });
+      const bodyText = await response.text();
+      if (!response.ok) {
+        throw new Error(`${config.provider} 返回 HTTP ${response.status}：${bodyText.slice(0, 500)}`);
+      }
+      let body;
+      try {
+        body = JSON.parse(bodyText);
+      } catch {
+        throw new Error(`${config.provider} 返回内容不是合法 JSON：${bodyText.slice(0, 500)}`);
+      }
+      return extractAnthropicText(body);
+    }
+
     const headers = { "Content-Type": "application/json" };
     if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
     const payload = {
       model: config.model,
       temperature: 0.2,
-      messages: [
-        { role: "system", content: "你是一个严格遵守 JSON 输出格式的中文求职助手。只输出最终结果，不解释过程。" },
-        { role: "user", content: prompt },
-      ],
+      messages: apiMessages,
     };
     if (responseFormat) payload.response_format = { type: responseFormat };
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
@@ -252,7 +378,13 @@ async function parseLlmJsonWithRepair({ rawResult, settings }) {
   } catch (error) {
     if (error.code !== "LLM_INVALID_JSON") throw error;
     const repairPrompt = buildJsonRepairPrompt({ rawText: error.rawText || rawResult });
-    const repairedResult = await runLlmPrompt({ prompt: repairPrompt, settings });
+    const repairedResult = await runLlmPrompt({
+      messages: [
+        { role: "system", content: WORKFLOW_SYSTEM_PROMPT },
+        { role: "user", content: repairPrompt },
+      ],
+      settings,
+    });
     return {
       parsed: parseJsonObject(repairedResult),
       repairedInvalidJson: true,
@@ -261,14 +393,126 @@ async function parseLlmJsonWithRepair({ rawResult, settings }) {
   }
 }
 
-async function runLlmBackend({ profile, jd, settings }) {
-  const skillPaths = settings.skillInjection ? getInstalledSkillPaths() : [];
-  const prompt = buildWorkflowPrompt({ profile, jd, skillPaths });
-  const rawResult = await runLlmPrompt({ prompt, settings });
+async function runWorkflowGeneration({ profile, jd, settings, reviewFeedback = [] }) {
+  const skillPaths = settings.skillInjection
+    ? [...getInstalledSkillPaths(), getDifficultySkillPath(jd && jd.difficulty)]
+    : [];
+  const prompt = buildWorkflowPrompt({ profile, jd, skillPaths, reviewFeedback });
+  const rawResult = await runLlmPrompt({
+    messages: [
+      { role: "system", content: WORKFLOW_SYSTEM_PROMPT },
+      { role: "user", content: prompt },
+    ],
+    settings,
+  });
   const { parsed, repairedInvalidJson, jsonRepairError } = await parseLlmJsonWithRepair({ rawResult, settings });
   return {
     ...normalizeWorkflowResult(parsed),
     ...(repairedInvalidJson ? { repairedInvalidJson, jsonRepairError } : {}),
+  };
+}
+
+async function reviewWorkflowResult({ profile, jd, workflowResult, settings }) {
+  const rawReview = await runLlmPrompt({
+    messages: [
+      { role: "system", content: WORKFLOW_SYSTEM_PROMPT },
+      { role: "user", content: buildReviewPrompt({ profile, jd, workflowResult }) },
+    ],
+    settings,
+  });
+  return normalizeReviewResult(parseJsonObject(rawReview));
+}
+
+const REVIEW_PASS_SCORE = 60;
+const MAX_REVIEW_RETRIES = 3;
+
+async function runLlmBackend({
+  profile,
+  jd,
+  settings,
+  reviewThreshold = REVIEW_PASS_SCORE,
+  maxRetries = MAX_REVIEW_RETRIES,
+  generateWorkflow = runWorkflowGeneration,
+  reviewWorkflow = reviewWorkflowResult,
+}) {
+  const attempts = [];
+  let best = null;
+  let reviewFeedback = [];
+
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    const result = await generateWorkflow({ profile, jd, settings, reviewFeedback });
+
+    let review;
+    try {
+      review = await reviewWorkflow({ profile, jd, workflowResult: result, settings });
+    } catch (error) {
+      review = {
+        score: 0,
+        fabrication: false,
+        issues: [{
+          aspect: "审核",
+          problem: `审核调用失败，结果未判定：${error.message}`,
+          severity: "major",
+        }],
+        comment: `审核调用失败，结果未判定：${error.message}`,
+        reviewError: true,
+        accepted: false,
+      };
+    }
+
+    attempts.push({ attempt, score: review.score, comment: review.comment });
+    if (!best || review.score > best.review.score) {
+      best = { result, review };
+    }
+
+    if (review.reviewError) {
+      return {
+        ...result,
+        review: {
+          ...review,
+          attempts,
+          circuitBroken: false,
+          bestScore: review.score,
+          passScore: reviewThreshold,
+        },
+      };
+    }
+
+    if (review.score >= reviewThreshold && !review.fabrication) {
+      return {
+        ...result,
+        review: {
+          ...review,
+          attempts,
+          circuitBroken: false,
+          accepted: true,
+          bestScore: best.review.score,
+          passScore: reviewThreshold,
+        },
+      };
+    }
+
+    reviewFeedback = review.issues.length
+      ? review.issues
+      : [
+          {
+            aspect: "总体",
+            problem: review.comment || "审核认为整体质量不足，请按评分标准全面提升",
+            severity: "major",
+          },
+        ];
+  }
+
+  return {
+    ...best.result,
+    review: {
+      ...best.review,
+      attempts,
+      circuitBroken: true,
+      accepted: false,
+      bestScore: best.review.score,
+      passScore: reviewThreshold,
+    },
   };
 }
 
@@ -335,7 +579,13 @@ function registerIpcHandlers() {
     return testModelConnection(effectiveSettings);
   });
 
-  ipcMain.handle("settings:listSkills", async () => getAgentSkillList());
+  ipcMain.handle("settings:listSkills", async () => [...getAgentSkillList(), ...getDifficultySkillList()]);
+
+  ipcMain.handle("chat:send", async (_event, { messages, settings }) => {
+    const effectiveSettings = normalizeSettings(settings || (await storage.loadSettings(DEFAULT_SETTINGS)));
+    const reply = await runLlmPrompt({ messages, settings: effectiveSettings, responseFormat: "" });
+    return { reply };
+  });
 
   ipcMain.handle("user:list", async () => storage.listUsers());
 
@@ -353,6 +603,20 @@ function registerIpcHandlers() {
   ipcMain.handle("user:delete", async (_event, username) => {
     return storage.deleteUser(username);
   });
+
+  ipcMain.handle("session:list", async (_event, username) => storage.listSessions(username));
+
+  ipcMain.handle("session:load", async (_event, { username, sessionId }) =>
+    storage.loadSession(username, sessionId)
+  );
+
+  ipcMain.handle("session:save", async (_event, { username, session }) =>
+    storage.saveSession(username, session)
+  );
+
+  ipcMain.handle("session:delete", async (_event, { username, sessionId }) =>
+    storage.deleteSession(username, sessionId)
+  );
 
   ipcMain.handle("workflow:run", async (_event, { username, profile, jd, settings }) => {
     const effectiveSettings = normalizeSettings(settings || (await storage.loadSettings(DEFAULT_SETTINGS)));
@@ -426,10 +690,16 @@ if (require.main === module || isElectronAppEntry) {
 
 module.exports = {
   getAgentSkillList,
+  getDifficultySkillList,
+  getDifficultySkillPath,
+  buildAnthropicRequestBody,
+  extractAnthropicText,
   formatLlmConnectionError,
   getLlmProviderConfig,
+  normalizeMessages,
   requiresApiKey,
   renderHtmlToPdfBuffer,
   normalizeSettings,
+  runLlmBackend,
   runLlmPrompt,
 };

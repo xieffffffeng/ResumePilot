@@ -57,9 +57,9 @@ flowchart LR
     E --> F[Local storage and export]
 ```
 
-The current workflow normally uses one main model request to simulate a resume writer, evaluator, and interviewer. Invalid JSON triggers one repair request. If repair fails, the application reports an error. Separate autonomous agents, tool-execution loops, and iterative content verification are not implemented.
+The current workflow uses one main model request to simulate a resume writer, evaluator, and interviewer, followed by a reviewer step for factual consistency and job fit. Invalid JSON triggers one repair request. Results scoring below 60 can be regenerated up to three times using reviewer feedback. A reviewer service failure is marked as unaudited and is never treated as a pass.
 
-Optional Skill injection reads excerpts from configured local documents into the prompt. It can be disabled when those documents are not installed.
+The project bundles seven Agent Skills: four resume/evaluation skills and three interview difficulty profiles (easy, normal, and hard). The app prefers a same-named user skill when available and falls back to the bundled version, then injects the selected excerpts into the model prompt when Skill injection is enabled.
 
 ## Architecture
 
@@ -97,7 +97,7 @@ Runtime data, credentials, generated resumes, dependencies, and build outputs ar
 
 - [ ] Word/PDF resume parsing with user-reviewed extraction.
 - [ ] Fact provenance, version history, and checks for dates and metrics.
-- [ ] Separate generation and review stages with bounded revision rounds.
+- [ ] Add review history, manual confirmation, and configurable pass thresholds.
 - [ ] Interactive interview follow-ups based on candidate answers.
 - [ ] Fixed evaluation tasks for factual consistency, job coverage, latency, and cost.
 

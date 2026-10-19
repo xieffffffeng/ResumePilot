@@ -86,3 +86,22 @@ test("compactProfile keeps education but removes photo base64", () => {
   assert.equal(compact.basic.photoDataUrl, undefined);
   assert.deepEqual(compact.education, [{ schoolName: "Example University", degree: "本科" }]);
 });
+
+test("buildWorkflowPrompt references the injected difficulty skill", () => {
+  const { buildWorkflowPrompt, normalizeDifficulty, getDifficultySkillName } = require("../src/services/llm-workflow");
+
+  assert.equal(normalizeDifficulty("easy"), "easy");
+  assert.equal(normalizeDifficulty("hard"), "hard");
+  assert.equal(normalizeDifficulty("nonsense"), "normal");
+  assert.equal(normalizeDifficulty(undefined), "normal");
+  assert.equal(getDifficultySkillName("easy"), "interview-easy");
+  assert.equal(getDifficultySkillName("hard"), "interview-hard");
+  assert.equal(getDifficultySkillName("oops"), "interview-normal");
+
+  const hard = buildWorkflowPrompt({ profile: {}, jd: { difficulty: "hard" }, skillPaths: [] });
+  assert.match(hard, /当前：hard/);
+  assert.match(hard, /面试难度 skill/);
+
+  const fallback = buildWorkflowPrompt({ profile: {}, jd: {}, skillPaths: [] });
+  assert.match(fallback, /当前：normal/);
+});

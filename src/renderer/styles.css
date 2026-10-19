@@ -867,6 +867,179 @@ select:focus {
     var(--surface);
 }
 
+.session-bar {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 10px;
+}
+
+.session-bar .field {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.chat-meta {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 420px;
+  max-height: 560px;
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.chat-msg {
+  max-width: 78%;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 14px;
+  position: relative;
+}
+
+.chat-msg.pinned {
+  border-left: 4px solid var(--copper);
+}
+
+.msg-actions {
+  display: none;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chat-msg:hover .msg-actions {
+  display: flex;
+}
+
+.msg-actions button {
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.msg-actions button:hover {
+  color: var(--nav);
+  border-color: var(--nav);
+}
+
+.archive-panel {
+  margin-top: 10px;
+  border: 1px dashed var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 8px 14px;
+}
+
+.archive-panel summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.archive-tools {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.archive-tools input {
+  flex: 1;
+}
+
+.archive-list {
+  display: grid;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.archive-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #fafbfc;
+}
+
+.archive-check {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.archive-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.archive-body p {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--nav);
+  line-height: 1.5;
+}
+
+.archive-item button {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.chat-msg p {
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+
+.chat-role {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  border-left: 4px solid var(--copper);
+  background: #fff4df;
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+  border-left: 4px solid var(--mint-dark);
+  background: #eef7f3;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: stretch;
+}
+
+.chat-input-row textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 52px;
+}
+
+.chat-input-row button {
+  flex: 0 0 auto;
+}
+
 .markdown-output {
   min-height: 600px;
   margin: 0;
@@ -913,6 +1086,92 @@ select:focus {
   color: var(--mint-dark);
   font-size: 38px;
   font-weight: 900;
+}
+
+.review-card {
+  border: 1px solid var(--rule);
+  border-left: 6px solid var(--mint-dark);
+  border-radius: 6px;
+  background: var(--paper);
+  padding: 18px;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow);
+}
+
+.review-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.review-card-header h4 {
+  margin: 0;
+  color: var(--nav);
+}
+
+.review-verdict {
+  font-weight: 800;
+  font-size: 14px;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.review-verdict.good {
+  background: #e2f3ec;
+  color: var(--mint-dark);
+}
+
+.review-verdict.bad {
+  background: #fdeaea;
+  color: #b3261e;
+}
+
+.review-attempts {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.review-attempts li {
+  margin: 10px 0;
+}
+
+.attempt-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attempt-status {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+.attempt-status.pass {
+  background: #e2f3ec;
+  color: var(--mint-dark);
+}
+
+.attempt-status.fail {
+  background: #fff4df;
+  color: #76502f;
+}
+
+.review-attempts p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.review-summary {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .columns {

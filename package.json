@@ -35,6 +35,7 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "skills/**/*",
       "package.json"
     ],
     "extraResources": [],

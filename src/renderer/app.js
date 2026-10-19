@@ -6,20 +6,377 @@ const state = {
   workflow: null,
   settings: null,
   managedUsers: [],
+  chatMessages: [],
+  chatTranscript: [],
+  archivedMessages: [],
+  resumeVersions: [],
+  currentSession: null,
+  sessions: [],
 };
+
+let messageSeq = 0;
+const AUTO_ARCHIVE_KEEP = 10; // 活跃层保留的非 system 消息条数，超出的旧消息自动归档（被 pin 的除外）
+
+function nextMessageId() {
+  messageSeq += 1;
+  return `m${Date.now().toString(36)}-${messageSeq}`;
+}
 
 const basicIds = ["name", "school", "email", "birthday", "idNumber", "phone", "location"];
 const educationFields = ["schoolName", "degree", "startDate", "endDate", "major"];
 
 const providerDefaults = {
-  deepseek: { model: "deepseek-chat", baseUrl: "https://api.deepseek.com/v1" },
-  openai: { model: "gpt-4o-mini", baseUrl: "https://api.openai.com/v1" },
-  openrouter: { model: "deepseek/deepseek-chat", baseUrl: "https://openrouter.ai/api/v1" },
-  ollama: { model: "llama3.1", baseUrl: "http://localhost:11434" },
-  lmstudio: { model: "local-model", baseUrl: "http://localhost:1234/v1" },
+  deepseek: { model: "deepseek-chat", baseUrl: "https://api.deepseek.com/v1", contextLimit: 65536 },
+  openai: { model: "gpt-4o-mini", baseUrl: "https://api.openai.com/v1", contextLimit: 128000 },
+  openrouter: { model: "deepseek/deepseek-chat", baseUrl: "https://openrouter.ai/api/v1", contextLimit: 65536 },
+  ollama: { model: "llama3.1", baseUrl: "http://localhost:11434", contextLimit: 8192 },
+  lmstudio: { model: "local-model", baseUrl: "http://localhost:1234/v1", contextLimit: 8192 },
+  kimi: { model: "kimi-k2.0905-preview", baseUrl: "https://api.kimi.com/coding", contextLimit: 1048576 },
 };
 
-const viewIds = ["profile", "jd", "resume", "evaluation", "interview"];
+const viewIds = ["profile", "jd", "resume", "evaluation", "interview", "chat"];
+
+const MAX_CHAT_MESSAGES = 20;
+const CONTEXT_BUDGET_RATIO = 0.9;
+const CHAT_KEEP_RECENT = 4;
+
+// 保底预算：达到上下文上限的 90% 就触发摘要压缩，给估算误差留出余量
+function getChatTokenBudget(settings = state.settings || {}) {
+  const limit = Number(settings.contextLimit) || 8000;
+  return Math.floor(limit * CONTEXT_BUDGET_RATIO);
+}
+
+function appendChatMessage(message) {
+  const withId = { ...message, id: message.id || nextMessageId() };
+  state.chatMessages.push(withId);
+  state.chatTranscript.push(withId);
+  return withId;
+}
+
+function archiveMessages(ids) {
+  const idSet = new Set(Array.isArray(ids) ? ids : [ids]);
+  const moving = state.chatMessages.filter(
+    (message) => idSet.has(message.id) && message.role !== "system"
+  );
+  if (!moving.length) return 0;
+  state.chatMessages = state.chatMessages.filter((message) => !idSet.has(message.id));
+  for (const message of moving) {
+    const { pinned, ...rest } = message;
+    state.archivedMessages.push({ ...rest, archivedAt: new Date().toISOString() });
+  }
+  renderChat();
+  renderArchiveList();
+  return moving.length;
+}
+
+function restoreArchivedMessages(ids) {
+  const idSet = ids
+    ? new Set(Array.isArray(ids) ? ids : [ids])
+    : new Set(state.archivedMessages.map((message) => message.id));
+  const movingBack = state.archivedMessages.filter((message) => idSet.has(message.id));
+  if (!movingBack.length) return 0;
+  state.archivedMessages = state.archivedMessages.filter((message) => !idSet.has(message.id));
+  for (const message of movingBack) {
+    const { archivedAt, ...rest } = message;
+    state.chatMessages.push({
+      ...rest,
+      id: nextMessageId(),
+      content: rest.content.startsWith("【归档恢复】") ? rest.content : `【归档恢复】${rest.content}`,
+    });
+  }
+  renderChat();
+  renderArchiveList();
+  return movingBack.length;
+}
+
+function togglePinMessage(id) {
+  const message = state.chatMessages.find((item) => item.id === id);
+  if (!message) return;
+  message.pinned = !message.pinned;
+  renderChat();
+}
+
+// 自动归档：活跃层非 system 消息超过保留条数时，最旧的未 pin 消息移入归档层
+function autoArchiveOldMessages() {
+  const active = state.chatMessages.filter((message) => message.role !== "system");
+  const overflow = active.length - AUTO_ARCHIVE_KEEP;
+  if (overflow <= 0) return;
+  const toArchive = active
+    .filter((message) => !message.pinned)
+    .slice(0, overflow)
+    .map((message) => message.id);
+  if (toArchive.length) archiveMessages(toArchive);
+}
+
+function createSessionFromText(text) {
+  const now = new Date().toISOString();
+  state.currentSession = {
+    id: `${now.replace(/[:.]/g, "-").slice(0, 19)}-${Math.random().toString(36).slice(2, 6)}`,
+    title: String(text || "新会话").replace(/\s+/g, " ").trim().slice(0, 40) || "新会话",
+    jobTitle: readJd().jobTitle || "",
+    createdAt: now,
+  };
+}
+
+async function persistSession() {
+  if (!state.currentSession) return;
+  const summaryMessage = state.chatMessages.find(
+    (message) => message.role === "system" && message.content.startsWith("【早前对话纪要】")
+  );
+  try {
+    await window.resumeApp.sessionSave(getUsername(), {
+      ...state.currentSession,
+      jobTitle: readJd().jobTitle || state.currentSession.jobTitle || "",
+      summary: summaryMessage ? summaryMessage.content.replace("【早前对话纪要】\n", "") : "",
+      messages: state.chatMessages,
+      transcript: state.chatTranscript,
+      archivedMessages: state.archivedMessages,
+      resumeVersions: state.resumeVersions,
+    });
+    await refreshSessions();
+  } catch (error) {
+    setStatus(`会话保存失败：${error.message || String(error)}`);
+  }
+}
+
+async function refreshSessions() {
+  try {
+    const sessions = await window.resumeApp.sessionList(getUsername());
+    state.sessions = sessions;
+    const currentId = state.currentSession && state.currentSession.id;
+    $("#sessionSelect").innerHTML =
+      `<option value="">选择历史会话…</option>` +
+      sessions
+        .map(
+          (session) =>
+            `<option value="${escapeHtml(session.id)}"${session.id === currentId ? " selected" : ""}>` +
+            `${escapeHtml(session.title)}（${escapeHtml(String(session.updatedAt || "").slice(0, 10))}）</option>`
+        )
+        .join("");
+  } catch {
+    // 用户尚未初始化时静默失败
+  }
+}
+
+async function openSelectedSession() {
+  const id = $("#sessionSelect").value;
+  if (!id) {
+    setStatus("请先在列表里选择一个会话");
+    return;
+  }
+  const session = await window.resumeApp.sessionLoad(getUsername(), id);
+  if (!session) {
+    setStatus("会话加载失败");
+    return;
+  }
+  state.currentSession = session;
+  state.chatMessages = Array.isArray(session.messages) ? session.messages : [];
+  state.chatTranscript = Array.isArray(session.transcript) ? session.transcript : state.chatMessages.slice();
+  state.archivedMessages = Array.isArray(session.archivedMessages) ? session.archivedMessages : [];
+  state.resumeVersions = Array.isArray(session.resumeVersions) ? session.resumeVersions : [];
+  renderChat();
+  renderArchiveList();
+  setStatus(`已打开会话：${session.title}`);
+}
+
+async function deleteSelectedSession() {
+  const id = $("#sessionSelect").value;
+  if (!id) {
+    setStatus("请先在列表里选择一个会话");
+    return;
+  }
+  const session = state.sessions.find((item) => item.id === id);
+  const ok = window.confirm(`确定删除会话“${session ? session.title : id}”吗？此操作不可撤销。`);
+  if (!ok) return;
+  await window.resumeApp.sessionDelete(getUsername(), id);
+  if (state.currentSession && state.currentSession.id === id) {
+    startNewSession();
+  }
+  await refreshSessions();
+  showToast("会话已删除");
+}
+
+function startNewSession() {
+  state.chatMessages = [];
+  state.chatTranscript = [];
+  state.archivedMessages = [];
+  state.resumeVersions = [];
+  state.currentSession = null;
+  $("#sessionSelect").value = "";
+  renderChat();
+  renderArchiveList();
+  setStatus("已开启新会话，首次发送时会注入个人事实层");
+}
+
+// 粗略估算 token 数：中文约 1.5 字符/token，上限取保守值
+function estimateChatTokens(messages) {
+  return messages.reduce((sum, message) => sum + Math.ceil(String(message.content).length / 1.5), 0);
+}
+
+function buildChatContextMessage() {
+  // 新会话的事实层：个人事实 + 当前岗位 + 当前简历快照
+  const profile = readProfileFromForm();
+  const jd = readJd();
+  const basic = profile.basic || {};
+  const lines = [
+    "你是 ResumePilot 的简历对话助手。基于候选人资料、目标岗位 JD 和当前简历回答用户问题，并给出具体的简历修改建议。",
+    `候选人：${basic.name || "未填写"} / ${basic.school || "未填写学校"} / ${basic.email || ""} ${basic.phone || ""}`,
+    `技能：${profile.skills || "未填写"}`,
+    `目标岗位：${jd.jobTitle || "未填写"}${jd.source ? `（${jd.source}）` : ""}`,
+  ];
+  if (jd.jdText) lines.push(`JD 原文：\n${jd.jdText.slice(0, 2000)}`);
+  if (state.workflow && state.workflow.resumeMarkdown) {
+    lines.push(`当前简历（第 ${state.resumeVersions.length} 版）：\n${state.workflow.resumeMarkdown.slice(0, 3000)}`);
+  } else {
+    lines.push("当前还没有生成简历，可以先引导用户运行流程或描述经历。");
+  }
+  return { role: "system", content: lines.join("\n") };
+}
+
+function renderChat() {
+  const box = $("#chatMessages");
+  box.innerHTML = state.chatMessages
+    .filter((message) => message.role !== "system")
+    .map(
+      (message) => `
+        <div class="chat-msg ${message.role}${message.pinned ? " pinned" : ""}" data-mid="${escapeHtml(message.id || "")}">
+          <span class="chat-role">${message.role === "user" ? "我" : "助手"}${message.pinned ? " 📌已保留" : ""}</span>
+          <p>${escapeHtml(message.content).replaceAll("\n", "<br>")}</p>
+          <div class="msg-actions">
+            <button data-action="pin" title="${message.pinned ? "取消保留" : "保留：不被自动归档"}">${message.pinned ? "📌" : "☆ 保留"}</button>
+            <button data-action="archive" title="归档：移出模型上下文，可随时恢复">📦 归档</button>
+          </div>
+        </div>
+      `
+    )
+    .join("");
+  box.scrollTop = box.scrollHeight;
+  const visibleCount = state.chatMessages.filter((message) => message.role !== "system").length;
+  const compressed = state.chatMessages.some((message) => message.role === "system" && message.content.startsWith("【早前对话纪要】"));
+  const sessionLabel = state.currentSession ? ` · 会话：${state.currentSession.title}` : " · 未保存会话";
+  $("#chatMeta").textContent =
+    `已生成 ${state.resumeVersions.length} 个简历版本 · 对话 ${visibleCount} 条 · 已归档 ${state.archivedMessages.length} 条` +
+    (compressed ? " · 早期对话已压缩为摘要" : "") +
+    sessionLabel;
+  const archiveCount = $("#archiveCount");
+  if (archiveCount) archiveCount.textContent = String(state.archivedMessages.length);
+}
+
+function renderArchiveList() {
+  const list = $("#archiveList");
+  if (!list) return;
+  const filter = ($("#archiveFilter") && $("#archiveFilter").value.trim().toLowerCase()) || "";
+  const filtered = state.archivedMessages.filter(
+    (message) => !filter || message.content.toLowerCase().includes(filter)
+  );
+  if (!filtered.length) {
+    list.innerHTML = `<p class="empty-note">${state.archivedMessages.length ? "没有匹配的归档消息" : "暂无归档消息"}</p>`;
+  } else {
+    list.innerHTML = filtered
+      .map(
+        (message) => `
+          <div class="archive-item" data-mid="${escapeHtml(message.id)}">
+            <label class="archive-check">
+              <input type="checkbox" data-mid="${escapeHtml(message.id)}" />
+            </label>
+            <div class="archive-body">
+              <span class="chat-role">${message.role === "user" ? "我" : "助手"} · ${escapeHtml(String(message.archivedAt || "").slice(5, 16).replace("T", " "))}</span>
+              <p>${escapeHtml(message.content.slice(0, 80))}${message.content.length > 80 ? "…" : ""}</p>
+            </div>
+            <button data-action="restore" data-mid="${escapeHtml(message.id)}">恢复</button>
+          </div>
+        `
+      )
+      .join("");
+  }
+  const archiveCount = $("#archiveCount");
+  if (archiveCount) archiveCount.textContent = String(state.archivedMessages.length);
+}
+
+function handleChatMessageAction(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const container = event.target.closest("[data-mid]");
+  const id = container && container.dataset.mid;
+  if (!id) return;
+  if (button.dataset.action === "pin") togglePinMessage(id);
+  if (button.dataset.action === "archive") {
+    archiveMessages([id]);
+    showToast("已归档，模型将不再看到这条消息");
+  }
+}
+
+async function maybeCompactChatHistory() {
+  const budget = getChatTokenBudget();
+  const overCount = state.chatMessages.length > MAX_CHAT_MESSAGES;
+  const overTokens = estimateChatTokens(state.chatMessages) > budget;
+  if (!overCount && !overTokens) return;
+  const recent = state.chatMessages.slice(-CHAT_KEEP_RECENT);
+  const oldMessages = state.chatMessages.slice(0, -CHAT_KEEP_RECENT);
+  setStatus(
+    overTokens
+      ? `上下文已接近上限（估算 ${estimateChatTokens(state.chatMessages)} / 预算 ${budget} tokens），正在压缩为摘要...`
+      : "对话历史较长，正在压缩为摘要..."
+  );
+  const { reply } = await window.resumeApp.chatSend(
+    [
+      {
+        role: "system",
+        content:
+          "你是对话纪要助手。请把下面的多轮对话压缩成不超过 300 字的中文纪要，保留：用户明确要求修改的内容、未完成的待办、已确认的结论。不要添加新内容。",
+      },
+      {
+        role: "user",
+        content: oldMessages.map((message) => `${message.role === "user" ? "用户" : "助手"}：${message.content}`).join("\n\n"),
+      },
+    ],
+    readSettingsFromForm()
+  );
+  // 保留事实层等 system 消息（不含旧纪要），只替换对话历史
+  const keptSystemMessages = state.chatMessages.filter(
+    (message) => message.role === "system" && !message.content.startsWith("【早前对话纪要】")
+  );
+  state.chatMessages = [
+    ...keptSystemMessages,
+    { role: "system", content: `【早前对话纪要】\n${reply}` },
+    ...recent,
+  ];
+  showToast("对话历史已压缩为摘要");
+  await persistSession();
+}
+
+async function sendChatMessage() {
+  const input = $("#chatInput");
+  const text = input.value.trim();
+  if (!text) return;
+  const settings = readSettingsFromForm();
+  input.value = "";
+  if (!state.chatMessages.length) {
+    appendChatMessage(buildChatContextMessage());
+  }
+  appendChatMessage({ role: "user", content: text });
+  if (!state.currentSession) {
+    createSessionFromText(text);
+  }
+  renderChat();
+  setStatus("助手正在回复...");
+  $("#sendChatBtn").disabled = true;
+  try {
+    await maybeCompactChatHistory();
+    const { reply } = await window.resumeApp.chatSend(state.chatMessages, settings);
+    appendChatMessage({ role: "assistant", content: reply });
+    renderChat();
+    setStatus("回复完成");
+    autoArchiveOldMessages();
+    await persistSession();
+  } catch (error) {
+    setStatus(`对话失败：${error.message || String(error)}`);
+    showToast("对话请求失败", "error");
+  } finally {
+    $("#sendChatBtn").disabled = false;
+  }
+}
+
 const defaultPreferences = {
   defaultStartView: "profile",
   toastSeconds: 3,
@@ -361,6 +718,7 @@ function readJd() {
     jobTitle: $("#jobTitle").value.trim(),
     source: $("#jobSource").value.trim(),
     jdText: $("#jdText").value.trim(),
+    difficulty: $("#interviewDifficulty").value,
   };
 }
 
@@ -373,6 +731,7 @@ function readSettingsFromForm() {
     apiKey: $("#apiKey").value.trim(),
     skillInjection: $("#skillInjection").checked,
     timeoutSeconds: Number($("#timeoutSeconds").value) || 120,
+    contextLimit: Number($("#contextLimit").value) || 0,
     preferences: {
       defaultStartView: $("#defaultStartView").value,
       toastSeconds: Number($("#toastSeconds").value) || defaultPreferences.toastSeconds,
@@ -392,6 +751,7 @@ function writeSettingsToForm(settings) {
   $("#baseUrl").value = settings.baseUrl || "";
   $("#apiKey").value = settings.apiKey || "";
   $("#timeoutSeconds").value = settings.timeoutSeconds || 120;
+  $("#contextLimit").value = settings.contextLimit || "";
   $("#skillInjection").checked = settings.skillInjection !== false;
   $("#defaultStartView").value = preferences.defaultStartView;
   $("#toastSeconds").value = preferences.toastSeconds;
@@ -406,6 +766,7 @@ function applyProviderDefaults() {
   if (!defaults) return;
   if (!$("#modelName").value.trim()) $("#modelName").value = defaults.model;
   if (!$("#baseUrl").value.trim()) $("#baseUrl").value = defaults.baseUrl;
+  if (!$("#contextLimit").value.trim()) $("#contextLimit").value = defaults.contextLimit || "";
   setBackendBadge(readSettingsFromForm());
 }
 
@@ -437,6 +798,50 @@ function renderWorkflow(result) {
   if (result.backend) {
     $("#backendStatus").textContent = `本次运行：${result.backend.mode}${result.backend.model ? ` / ${result.backend.model}` : ""}`;
   }
+  if (result.review) {
+    const review = result.review;
+    const reviewLabel =
+      `审核 ${review.score}/100` +
+      (review.attempts && review.attempts.length > 1 ? ` · 第 ${review.attempts.length} 次生成通过` : "") +
+      (review.circuitBroken ? ` · ⚠️ 已熔断，展示历史最高分的版本（${review.bestScore}/100）` : "");
+    $("#backendStatus").textContent += ` / ${reviewLabel}`;
+    renderReviewCard(review);
+  } else {
+    $("#reviewCard").hidden = true;
+  }
+}
+
+function renderReviewCard(review) {
+  const card = $("#reviewCard");
+  card.hidden = false;
+  const verdict = $("#reviewVerdict");
+  if (review.reviewError) {
+    verdict.textContent = "⚠️ 审核调用失败，本次未实际审核";
+    verdict.className = "review-verdict bad";
+  } else if (review.circuitBroken) {
+    verdict.textContent = `⚠️ 已熔断 · 历史最高分 ${review.bestScore}/100`;
+    verdict.className = "review-verdict bad";
+  } else {
+    verdict.textContent = `${review.score}/100 通过` + (review.fabrication ? " · 发现编造" : "");
+    verdict.className = review.fabrication ? "review-verdict bad" : "review-verdict good";
+  }
+  const passScore = Number(review.passScore) || 60;
+  $("#reviewAttempts").innerHTML = (review.attempts || [])
+    .map(
+      (attempt) => `
+        <li>
+          <div class="attempt-head">
+            <strong>第 ${attempt.attempt} 次生成：${attempt.score}/100</strong>
+            <span class="attempt-status ${attempt.score >= passScore ? "pass" : "fail"}">
+              ${attempt.score >= passScore ? "通过" : "打回"}
+            </span>
+          </div>
+          <p>${escapeHtml(attempt.comment || "（无评语）")}</p>
+        </li>
+      `
+    )
+    .join("");
+  $("#reviewSummary").textContent = review.comment ? `审核员评语：${review.comment}` : "";
 }
 
 async function refreshUsers() {
@@ -451,6 +856,8 @@ async function loadUser(username = getUsername()) {
   $("#username").value = username;
   const profile = await window.resumeApp.loadUser(username);
   writeProfileToForm(profile);
+  startNewSession();
+  await refreshSessions();
   setStatus(`Loaded ${username}`);
 }
 
@@ -598,9 +1005,31 @@ async function runWorkflow() {
   try {
     const result = await window.resumeApp.runWorkflow(username, profile, jd, settings);
     renderWorkflow(result);
+    state.resumeVersions.push({
+      at: new Date().toISOString(),
+      source: "workflow",
+      resumeMarkdown: result.resumeMarkdown,
+      evaluation: result.evaluation,
+      interview: result.interview,
+    });
+    appendChatMessage({
+      role: "assistant",
+      content: `已根据岗位「${jd.jobTitle || "未命名岗位"}」生成第 ${state.resumeVersions.length} 版简历` +
+        `（评分 ${result.evaluation.score}/100）。可以继续在对话里提修改要求。`,
+    });
+    renderChat();
+    await persistSession();
     await refreshUsers();
     setStatus(`Session saved: ${result.artifactPath}`);
-    showToast("流程运行完成");
+    if (result.review && result.review.reviewError) {
+      showToast("⚠️ 审核调用失败，结果未判定", "error");
+    } else if (result.review && result.review.circuitBroken) {
+      showToast(`⚠️ 审核连续 ${result.review.attempts.length} 次未达 60 分已熔断，展示最高分版本（${result.review.bestScore}/100）`, "error");
+    } else if (result.review && result.review.attempts && result.review.attempts.length > 1) {
+      showToast(`流程运行完成 · 审核 ${result.review.score}/100（第 ${result.review.attempts.length} 次通过）`);
+    } else {
+      showToast("流程运行完成");
+    }
     if (getPreferences(settings).autoOpenResumeAfterRun) switchView("resume");
   } catch (error) {
     const message = error.message || String(error);
@@ -696,6 +1125,7 @@ async function init() {
   $("#loadUserBtn").addEventListener("click", () => loadUser());
   $("#newProfileBtn").addEventListener("click", async () => {
     state.workflow = null;
+    startNewSession();
     writeProfileToForm(await window.resumeApp.createEmptyProfile());
     setStatus("New profile");
   });
@@ -722,6 +1152,7 @@ async function init() {
     "baseUrl",
     "apiKey",
     "timeoutSeconds",
+    "contextLimit",
     "skillInjection",
     "defaultStartView",
     "toastSeconds",
@@ -732,6 +1163,42 @@ async function init() {
     $(`#${id}`).addEventListener("input", () => setBackendBadge(readSettingsFromForm()));
   });
   $("#runWorkflowBtn").addEventListener("click", runWorkflow);
+  $("#sendChatBtn").addEventListener("click", sendChatMessage);
+  $("#clearChatBtn").addEventListener("click", startNewSession);
+  $("#openSessionBtn").addEventListener("click", openSelectedSession);
+  $("#deleteSessionBtn").addEventListener("click", deleteSelectedSession);
+  $("#newSessionBtn").addEventListener("click", startNewSession);
+  $("#chatInput").addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      sendChatMessage();
+    }
+  });
+  $("#chatMessages").addEventListener("click", handleChatMessageAction);
+  $("#archiveFilter").addEventListener("input", renderArchiveList);
+  $("#archiveList").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-action='restore']");
+    if (!button) return;
+    restoreArchivedMessages([button.dataset.mid]);
+    showToast("已恢复到对话，模型重新可见");
+  });
+  $("#restoreSelectedBtn").addEventListener("click", () => {
+    const ids = $$("#archiveList input[type='checkbox']:checked").map((box) => box.dataset.mid);
+    if (!ids.length) {
+      setStatus("请先勾选要恢复的归档消息");
+      return;
+    }
+    restoreArchivedMessages(ids);
+    showToast(`已恢复 ${ids.length} 条消息`);
+  });
+  $("#restoreAllBtn").addEventListener("click", () => {
+    if (!state.archivedMessages.length) {
+      setStatus("归档层是空的");
+      return;
+    }
+    restoreArchivedMessages(null);
+    showToast("已恢复全部归档消息");
+  });
   $("#birthday").addEventListener("change", syncAgeFromBirthday);
   $("#birthday").addEventListener("input", syncAgeFromBirthday);
   $("#photoInput").addEventListener("change", handlePhotoUpload);

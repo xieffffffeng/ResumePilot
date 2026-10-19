@@ -82,6 +82,54 @@ function createStorage(baseDir) {
       await fs.rm(userDir, { recursive: true, force: true });
       return { username: safe, path: userDir };
     },
+    async listSessions(username) {
+      const { userDir } = await ensureUserDir(username);
+      const index = await readJson(path.join(userDir, "sessions", "_index.json"), []);
+      return Array.isArray(index) ? index.filter((entry) => entry && entry.id) : [];
+    },
+    async loadSession(username, sessionId) {
+      const { userDir } = await ensureUserDir(username);
+      const safeId = sanitizeUsername(sessionId);
+      return readJson(path.join(userDir, "sessions", `${safeId}.json`), null);
+    },
+    async saveSession(username, session) {
+      if (!session || !session.id) throw new Error("会话缺少 id");
+      const { userDir } = await ensureUserDir(username);
+      const safeId = sanitizeUsername(session.id);
+      const sessionsDir = path.join(userDir, "sessions");
+      const payload = {
+        ...session,
+        id: safeId,
+        updatedAt: new Date().toISOString(),
+      };
+      await writeJson(path.join(sessionsDir, `${safeId}.json`), payload);
+
+      const indexPath = path.join(sessionsDir, "_index.json");
+      const index = await readJson(indexPath, []);
+      const list = Array.isArray(index) ? index : [];
+      const entry = {
+        id: safeId,
+        title: String(payload.title || "未命名会话").slice(0, 60),
+        jobTitle: String(payload.jobTitle || "").slice(0, 60),
+        updatedAt: payload.updatedAt,
+        summary: String(payload.summary || "").slice(0, 120),
+      };
+      const rest = list.filter((item) => item && item.id !== safeId);
+      rest.unshift(entry);
+      await writeJson(indexPath, rest);
+      return { id: safeId, path: path.join(sessionsDir, `${safeId}.json`) };
+    },
+    async deleteSession(username, sessionId) {
+      const { userDir } = await ensureUserDir(username);
+      const safeId = sanitizeUsername(sessionId);
+      const sessionsDir = path.join(userDir, "sessions");
+      await fs.rm(path.join(sessionsDir, `${safeId}.json`), { force: true });
+      const indexPath = path.join(sessionsDir, "_index.json");
+      const index = await readJson(indexPath, []);
+      const rest = (Array.isArray(index) ? index : []).filter((item) => item && item.id !== safeId);
+      await writeJson(indexPath, rest);
+      return { id: safeId };
+    },
     async saveArtifact(username, kind, content, extension = "md") {
       const { userDir } = await ensureUserDir(username);
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");

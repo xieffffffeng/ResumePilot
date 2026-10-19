@@ -69,19 +69,39 @@ function loadSkillContexts(skillPaths = []) {
     .join("\n\n---\n\n");
 }
 
-function buildWorkflowPrompt({ profile, jd, skillPaths }) {
+const DIFFICULTY_SKILL_NAMES = {
+  easy: "interview-easy",
+  normal: "interview-normal",
+  hard: "interview-hard",
+};
+
+function normalizeDifficulty(value) {
+  return Object.prototype.hasOwnProperty.call(DIFFICULTY_SKILL_NAMES, value) ? value : "normal";
+}
+
+function getDifficultySkillName(value) {
+  return DIFFICULTY_SKILL_NAMES[normalizeDifficulty(value)];
+}
+
+function buildWorkflowPrompt({ profile, jd, skillPaths, reviewFeedback = [] }) {
   const profileJson = JSON.stringify(compactProfile(profile), null, 2);
   const jdJson = JSON.stringify(jd || {}, null, 2);
+  const difficulty = normalizeDifficulty(jd && jd.difficulty);
   const skillContext = loadSkillContexts(skillPaths);
   const skillNote = skillContext
     ? `\n\n已注入的 Agent skill 摘要如下，请用于角色边界、任务拆解、输出质量检查：\n${skillContext}`
+    : "";
+  const feedbackNote = reviewFeedback.length
+    ? `\n\n上次生成结果被审核员打回（审核意见如下）。请逐条修正后重新生成，修正后仍须满足上述全部硬性要求：\n${reviewFeedback
+        .map((item, index) => `${index + 1}. [${item.severity || "major"}] ${item.problem}`)
+        .join("\n")}`
     : "";
 
   return `
 你是 Windows 简历应用后端中的求职工作流模型。请模拟三个顺序协作的 agent：
 1. 简历整理 Agent：按照 JD 从候选人长期资料库中抽取最相关信息，生成中文定制简历。
 2. 简历评估 Agent：对生成简历按 JD 匹配度评分，并给出具体改进建议。
-3. 面试官 Agent：根据 JD、简历和评估结果生成模拟面试问题，并为每个问题给出参考答案。
+3. 面试官 Agent：根据 JD、简历和评估结果生成模拟面试问题，并为每个问题给出参考答案。面试题难度画像由已注入的面试难度 skill（当前：${difficulty}）约束，必须严格按该画像的配比与风格出题。
 
 硬性要求：
 - 只使用候选人资料和岗位 JD，不编造学校、公司、时间、奖项、成绩、身份证等事实。
@@ -97,7 +117,7 @@ ${profileJson}
 
 岗位 JD：
 ${jdJson}
-${skillNote}
+${skillNote}${feedbackNote}
 
 JSON 结构必须完全包含：
 {
@@ -192,7 +212,9 @@ module.exports = {
   buildJsonRepairPrompt,
   buildWorkflowPrompt,
   compactProfile,
+  getDifficultySkillName,
   loadSkillContexts,
+  normalizeDifficulty,
   normalizeInterviewQuestions,
   normalizeWorkflowResult,
   parseJsonObject,

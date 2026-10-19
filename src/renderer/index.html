@@ -36,6 +36,7 @@
           <button class="step-btn" data-step="resume">简历整理</button>
           <button class="step-btn" data-step="evaluation">简历评估</button>
           <button class="step-btn" data-step="interview">模拟面试</button>
+          <button class="step-btn" data-step="chat">对话</button>
         </nav>
 
         <section class="agent-panel">
@@ -153,6 +154,14 @@
               <span>JD 来源</span>
               <input id="jobSource" placeholder="公司 / 平台 / 链接，可选" />
             </label>
+            <label class="field">
+              <span>面试难度</span>
+              <select id="interviewDifficulty">
+                <option value="easy">简单 · 基础为主 6:3:1</option>
+                <option value="normal" selected>普通 · 标准混合 3:5:2</option>
+                <option value="hard">困难 · 压力面试 1.5:3.5:5</option>
+              </select>
+            </label>
           </div>
           <label class="field">
             <span>岗位描述</span>
@@ -179,6 +188,14 @@
               <p id="keywordCoverage">等待运行</p>
             </div>
           </div>
+          <div id="reviewCard" class="review-card" hidden>
+            <div class="review-card-header">
+              <h4>审核员评分</h4>
+              <span id="reviewVerdict" class="review-verdict"></span>
+            </div>
+            <ol id="reviewAttempts" class="review-attempts"></ol>
+            <p id="reviewSummary" class="review-summary"></p>
+          </div>
           <div class="columns">
             <div>
               <h4>改进建议</h4>
@@ -198,6 +215,43 @@
           </div>
           <ol id="questionList" class="question-list"></ol>
           <div id="interviewTips" class="tips"></div>
+        </section>
+
+        <section id="chat" class="view">
+          <div class="output-toolbar">
+            <h3>对话助手</h3>
+            <div class="toolbar-actions">
+              <button id="clearChatBtn">清空对话</button>
+            </div>
+          </div>
+          <div class="session-bar">
+            <label class="field">
+              <span>历史会话</span>
+              <select id="sessionSelect"></select>
+            </label>
+            <button id="openSessionBtn">打开</button>
+            <button id="deleteSessionBtn" class="danger">删除</button>
+            <button id="newSessionBtn" class="primary">新会话</button>
+          </div>
+          <p id="chatMeta" class="chat-meta">基于当前资料和岗位 JD 对话</p>
+          <div id="chatMessages" class="chat-messages"></div>
+          <details class="archive-panel" id="archivePanel">
+            <summary>归档消息（<span id="archiveCount">0</span>）—— 已移出模型上下文，可检索恢复</summary>
+            <div class="archive-tools">
+              <input id="archiveFilter" placeholder="关键词过滤归档消息" />
+              <button id="restoreSelectedBtn">恢复所选</button>
+              <button id="restoreAllBtn">全部恢复</button>
+            </div>
+            <div id="archiveList" class="archive-list"></div>
+          </details>
+          <div class="chat-input-row">
+            <textarea
+              id="chatInput"
+              rows="2"
+              placeholder="继续提要求，例如：帮我把项目经历写得更突出量化结果"
+            ></textarea>
+            <button id="sendChatBtn" class="primary">发送</button>
+          </div>
         </section>
 
         <footer id="statusBar" class="status-bar">Ready</footer>
@@ -234,12 +288,14 @@
                 <option value="openrouter">OpenRouter</option>
                 <option value="ollama">Ollama 本地</option>
                 <option value="lmstudio">本地 OpenAI-compatible</option>
+                <option value="kimi">Kimi Code / Anthropic 兼容</option>
               </select>
             </label>
             <label class="field"><span>模型名</span><input id="modelName" placeholder="例如 deepseek-chat / gpt-4o-mini / llama3.1" /></label>
             <label class="field"><span>Base URL</span><input id="baseUrl" placeholder="例如 https://api.deepseek.com/v1 或 http://localhost:1234/v1" /></label>
-            <label class="field"><span>API Key</span><input id="apiKey" type="password" placeholder="DeepSeek / OpenAI / OpenRouter 必填，本地模型可留空" /></label>
+            <label class="field"><span>API Key</span><input id="apiKey" type="password" placeholder="DeepSeek / OpenAI / OpenRouter / Kimi 必填，本地模型可留空" /></label>
             <label class="field"><span>超时时间（秒）</span><input id="timeoutSeconds" type="number" min="30" step="10" /></label>
+            <label class="field"><span>上下文上限（tokens）</span><input id="contextLimit" type="number" min="1000" step="1000" placeholder="留空自动使用服务商默认值" /></label>
             <label class="toggle-field modal-toggle">
               <input id="skillInjection" type="checkbox" />
               <span>注入 Agent skills</span>
@@ -256,6 +312,7 @@
                 <option value="resume">简历整理</option>
                 <option value="evaluation">简历评估</option>
                 <option value="interview">模拟面试</option>
+                <option value="chat">对话</option>
               </select>
             </label>
             <label class="field">
